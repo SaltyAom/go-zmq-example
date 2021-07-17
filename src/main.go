@@ -1,65 +1,73 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"math"
 
 	zmq "github.com/pebbe/zmq4"
-
-	"time"
 )
 
+type Queue struct {
+	message  string
+	response chan string
+}
+
 func sub() {
-	socket, _ := zmq.NewSocket(zmq.REP)
+	socket, err := zmq.NewSocket(zmq.REP)
+
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 
 	defer socket.Close()
 	socket.Bind("tcp://0.0.0.0:5556")
 
 	for {
-		socket.Recv(0)
+		message, _ := socket.Recv(0)
+		println("Req:", message)
 
 		socket.Send("World", 0)
 	}
 }
 
-func sendMessage(message string) {
-	socket, _ := zmq.NewSocket(zmq.REQ)
+func pub(queues <-chan Queue) {
+	for queue := range queues {
+		sendMessage(queue)
+	}
+}
+
+func sendMessage(queue Queue) {
+	socket, err := zmq.NewSocket(zmq.REQ)
+
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
 	socket.Connect("tcp://0.0.0.0:5556")
+	socket.Send(queue.message, 0)
 
-	socket.Send(message, 0)
+	message, _ := socket.Recv(0)
 
-	socket.Recv(0)
+	queue.response <- message
 
 	socket.Close()
 }
 
-func pub(queues <-chan string) {
-	for message := range queues {
-		sendMessage(message)
-	}
-}
-
-const limit = 10_000_000
-
 func main() {
 	go sub()
 
-	ch := make(chan string, int(math.Pow(2, 24)))
+	ch := make(chan Queue, int(math.Pow(2, 24)))
 	go pub(ch)
 
-	// ? Make sure everything is initialize
-	ch <- "Hello"
+	// ? response waifu
+	responseChan := make(chan string)
 
-	t := time.Now()
-
-	for i := 0; i <= limit; i++ {
-		ch <- "Hello"
+	ch <- Queue{
+		message:  "Hello",
+		response: responseChan,
 	}
 
-	m := time.Since(t).Microseconds()
-
-	fmt.Printf("Done %v process in %v ms or %v us\n", limit, m/1000, m)
-	if m != 0 {
-		fmt.Printf("Average %v req/s\n", int(math.Round(100000/float64(m)*float64(limit))))
-	}
+	println("Res:", <-responseChan)
 }
